@@ -6,23 +6,42 @@ import (
 	"strings"
 )
 
-type TranslatedError interface {
-	Error() string
+type TranslatedError struct {
+	template  string
+	transVars transVarFunc
 }
+
+type transVarFunc func(language string, data map[string]string)
 
 type errorMessage struct {
 	manager      *Manager
 	template     string
-	translations []TranslatedError
+	translations []*TranslatedError
 }
 
+// Set sets a translated template for the corresponding errorMessage
 func (e *errorMessage) Set(language, message string) error {
 	i, err := e.manager.languageIndex(language)
 	if err != nil {
 		return err
 	}
 
-	e.translations[i] = errors.New(message)
+	e.translations[i] = &TranslatedError{message, nil}
+
+	return nil
+}
+
+// SetCustom is similar to Set, but allows you to pass in a transVarFunc, which
+// takes a language string, as well as a map[string]string of extracted variables
+// from the original error, in case further manipulation is required. See `hurr_test.go`
+// for a full example.
+func (e *errorMessage) SetCustom(language, message string, transVars transVarFunc) error {
+	i, err := e.manager.languageIndex(language)
+	if err != nil {
+		return err
+	}
+
+	e.translations[i] = &TranslatedError{message, transVars}
 
 	return nil
 }
@@ -68,7 +87,7 @@ func (e *errorMessage) findValues(text string) map[string]string {
 
 func (e *errorMessage) populate(index int, data map[string]string) string {
 	var buf bytes.Buffer
-	tmpl := e.translations[index].Error()
+	tmpl := e.translations[index].template
 
 	startVar := -1
 	prevVar := 0
@@ -111,7 +130,7 @@ func (m *Manager) Add(tmpl string) *errorMessage {
 	err := errorMessage{
 		manager:      m,
 		template:     tmpl,
-		translations: make([]TranslatedError, len(m.languages)),
+		translations: make([]*TranslatedError, len(m.languages)),
 	}
 	m.Errors = append(m.Errors, &err)
 
@@ -162,6 +181,10 @@ func (m *Manager) findErrorTemplate(text string) (*errorMessage, map[string]stri
 	return errMsg, nil
 }
 
+// Get takes a normal Go error, and tries to find a matching error template in the `hurr.Manager`.
+// If no suitable error is found, an error is returned. Otherwise, template variables will be extracted
+// and a new error string is returned, based on the given language template passed to `Set` or
+// `SetCustom` earlier.
 func (m *Manager) Get(language string, err error) (string, error) {
 	langIndex, ierr := m.languageIndex(language)
 	if ierr != nil {
@@ -174,11 +197,18 @@ func (m *Manager) Get(language string, err error) (string, error) {
 	}
 
 	data := errMsg.findValues(err.Error())
+
+	translation := errMsg.translations[langIndex]
+	if translation.transVars != nil {
+		translation.transVars(language, data)
+	}
+
 	str := errMsg.populate(langIndex, data)
 
 	return str, nil
 }
 
+// NewManager creates a new error manager with support for one or more languages, passed in as a []string.
 func NewManager(languages []string) *Manager {
 	mgr := Manager{
 		[]*errorMessage{},

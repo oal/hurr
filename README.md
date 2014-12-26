@@ -26,3 +26,5 @@ With `hurr` you can do this:
 ```
 
 Add as many error messages as you need to a `hurr.Manager`, and get their corresponding "human friendly" versions by calling `mgr.Get(language, error)`, where `language` is one of your manager's supported languages, and `error` is the `error` returned from some third party library. `hurr` will scan through the error and look for a match, and extracting any variables, between `{{` and `}}`.
+
+See `hurr_test.go` for more examples, as well as how to use `.SetCustom`, and providing custom translations for variables extracted from error messages.
